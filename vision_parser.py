@@ -2,15 +2,25 @@
 """
 Vision parser: sends schedule screenshot to OpenAI GPT-4o Vision,
 extracts shifts for מאור פורמן.
+Upscales small images before sending to improve OCR accuracy.
 """
 
 import os
+import io
 import json
 import base64
 import re
+import logging
+from PIL import Image
 from openai import OpenAI
 
+logger = logging.getLogger(__name__)
 client = OpenAI(api_key=os.environ["OPEN_API_KEY"])
+_last_debug = ""
+
+
+def get_last_debug() -> str:
+    return _last_debug
 
 SHIFT_TIMES = {
     "בוקר": ("07:00", "15:00"),
@@ -20,42 +30,70 @@ SHIFT_TIMES = {
     "כפולה לילה": ("15:00", "03:00"),
 }
 
-VISION_PROMPT = """אתה מנתח טבלת סידור עבודה. עיין בתמונה בזהירות.
+MIN_WIDTH = 2000  # upscale if image is narrower than this
 
-משימה: מצא את השורות של "מאור פורמן" בטבלה.
+VISION_PROMPT = """You are analyzing a Hebrew work schedule table (סידור עבודה).
+The table is read RIGHT TO LEFT. Column headers are days/dates. Row headers on the RIGHT side are employee names.
 
-לכל יום שבו מופיע "מאור פורמן", החזר את המידע הבא:
+TASK: Find every cell where the name "מאור פורמן" (Maor Furman) appears.
 
-1. **תאריך** — קרא מכותרת העמודה/יום (פורמט DD/MM/YYYY או DD/MM)
-2. **משמרת** — באיזו עמודה הוא מופיע: בוקר / צהריים / לילה
-3. **12/12** — האם העמודה הסמוכה מכילה את הסימן "12/12" או "12\\12"?
-   - אם הוא ב"בוקר" וב"צהריים" יש "12/12" → shift_type = "כפולה בוקר"
-   - אם הוא ב"צהריים" וב"לילה" יש "12/12" → shift_type = "כפולה לילה"
-   - אחרת → shift_type = שם העמודה (בוקר/צהריים/לילה)
-4. **מיקום** — האם רקע שורת הכותרת של מאור פורמן ירוק?
-   - ירוק → location = "הרצליה"
-   - אחרת → location = 'רמ"ש'
-5. **תפקיד** — קרא את הטקסט בכותרת השורה (למשל: מאבטח 1 אקדח, צלף, שיפוצים)
+The table structure:
+- Rightmost column = employee names / role names
+- Top row = day/date headers (Sunday=ראשון, Monday=שני, etc.)
+- Each day is split into 3 sub-columns: בוקר (morning), צהריים (afternoon), לילה (night)
+- A cell may contain a name, "12/12", or be empty
 
-החזר JSON בלבד, ללא הסברים נוספים:
+For EACH day where "מאור פורמן" appears, extract:
+
+1. date: the date shown in that day's column header (DD/MM or DD/MM/YYYY)
+2. column: which sub-column — "בוקר", "צהריים", or "לילה"
+3. shift_type: apply 12/12 logic:
+   - if name is in "בוקר" AND the "צהריים" cell of the same day contains "12/12" → "כפולה בוקר"
+   - if name is in "צהריים" AND the "לילה" cell of the same day contains "12/12" → "כפולה לילה"
+   - otherwise → same as column value
+4. location: look at the BACKGROUND COLOR of the row where מאור פורמן appears:
+   - GREEN background → "הרצליה"
+   - any other color → "רמ\"ש"
+5. role: read the text in the ROW HEADER (rightmost cell of that row), e.g. "מאבטח 1 אקדח", "צלף", "שיפוצים"
+
+Return ONLY valid JSON, no extra text:
 {
+  "debug": "brief description of what you see in the table",
   "shifts": [
     {
       "date": "DD/MM/YYYY",
       "column": "בוקר|צהריים|לילה",
       "shift_type": "בוקר|צהריים|לילה|כפולה בוקר|כפולה לילה",
       "location": "הרצליה|רמ\"ש",
-      "role": "שם התפקיד"
+      "role": "role text from row header"
     }
   ]
 }
 
-אם מאור פורמן לא מופיע בכלל → החזר: {"shifts": []}
+If מאור פורמן does not appear anywhere → {"debug": "name not found", "shifts": []}
 """
 
 
+def _upscale_image(image_bytes: bytes) -> bytes:
+    img = Image.open(io.BytesIO(image_bytes))
+    w, h = img.size
+    if w < MIN_WIDTH:
+        scale = MIN_WIDTH / w
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        img = img.resize((new_w, new_h), Image.LANCZOS)
+        logger.info(f"Upscaled image from {w}x{h} to {new_w}x{new_h}")
+    else:
+        logger.info(f"Image size OK: {w}x{h}, no upscale needed")
+    buf = io.BytesIO()
+    img.save(buf, format="JPEG", quality=95)
+    return buf.getvalue()
+
+
 def parse_schedule_image(image_bytes: bytes) -> list[dict]:
-    b64 = base64.b64encode(image_bytes).decode("utf-8")
+    processed = _upscale_image(image_bytes)
+    b64 = base64.b64encode(processed).decode("utf-8")
+
     response = client.chat.completions.create(
         model="gpt-4o",
         messages=[
@@ -73,13 +111,18 @@ def parse_schedule_image(image_bytes: bytes) -> list[dict]:
                 ],
             }
         ],
-        max_tokens=1024,
+        max_tokens=1500,
         temperature=0.1,
     )
 
     raw = response.choices[0].message.content.strip()
+    logger.info(f"GPT-4o raw response: {raw[:500]}")
     raw = re.sub(r"^```[a-z]*\n?", "", raw).rstrip("`").strip()
     data = json.loads(raw)
+
+    global _last_debug
+    _last_debug = data.get("debug", "אין מידע")
+    logger.info(f"GPT-4o debug: {_last_debug}")
     shifts = data.get("shifts", [])
 
     for s in shifts:
@@ -89,21 +132,3 @@ def parse_schedule_image(image_bytes: bytes) -> list[dict]:
         s["end_time"] = end
 
     return shifts
-
-
-def format_shifts_for_confirmation(shifts: list[dict]) -> str:
-    if not shifts:
-        return "לא נמצאו משמרות עבור מאור פורמן בתמונה זו."
-
-    lines = ["זיהיתי את המשמרות הבאות:\n"]
-    for s in shifts:
-        end_note = ""
-        if s["shift_type"] in ("לילה", "כפולה לילה"):
-            end_note = " (+1 יום)"
-        lines.append(
-            f"📅 {s['date']} — {s['location']}, {s['role']}, {s['shift_type']} "
-            f"({s['start_time']}–{s['end_time']}{end_note})"
-        )
-
-    lines.append("\nלאשר ולהכניס ליומן? לחץ ✅ לאישור או ❌ לביטול")
-    return "\n".join(lines)

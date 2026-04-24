@@ -19,7 +19,7 @@ from telegram.ext import (
     filters,
 )
 
-from vision_parser import parse_schedule_image
+from vision_parser import parse_schedule_image, get_last_debug
 from calendar_client import create_all_shifts
 
 logging.basicConfig(
@@ -55,9 +55,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
         shifts = parse_schedule_image(bytes(image_bytes))
 
         if not shifts:
+            debug_info = get_last_debug()
             await update.message.reply_text(
-                "לא מצאתי משמרות עבור מאור פורמן בתמונה זו.\n"
-                "נסה לשלוח תמונה ברורה יותר."
+                f"לא מצאתי משמרות עבור מאור פורמן.\n\n"
+                f"🔍 מה ה-AI ראה בתמונה:\n{debug_info}\n\n"
+                f"נסה לשלוח תמונה ברורה יותר או חתוך אותה לאזור הרלוונטי."
             )
             return
 
