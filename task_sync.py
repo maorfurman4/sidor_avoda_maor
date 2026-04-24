@@ -43,13 +43,13 @@ Rules:
 
 Return ONLY a valid JSON array:
 [
-  {{
+  {
     "type": "task|event|ignore",
     "title": "short Hebrew title",
     "date": "DD/MM/YYYY",
     "start_time": "HH:MM or null",
     "end_time": "HH:MM or null"
-  }}
+  }
 ]
 
 Message:
@@ -103,7 +103,7 @@ def parse_message(text: str) -> list[dict]:
 def _calendar_service():
     info = json.loads(os.environ["GOOGLE_SERVICE_ACCOUNT_JSON"])
     creds = SACredentials.from_service_account_info(
-        info, scopes=["https://www.googleapis.com/auth/calendar"]
+        info, scopes=["[https://www.googleapis.com/auth/calendar](https://www.googleapis.com/auth/calendar)"]
     )
     return build("calendar", "v3", credentials=creds)
 
@@ -140,13 +140,20 @@ def add_calendar_event(parsed: dict) -> str:
 # ── Google Tasks (OAuth2) ─────────────────────────────────────────────────────
 
 def _tasks_service():
+    # שולף את ה-JSON המלא מהסוד בגיטהאב
+    tasks_creds_json = os.environ.get("GOOGLE_TASKS_CREDENTIALS")
+    if not tasks_creds_json:
+        raise ValueError("Missing GOOGLE_TASKS_CREDENTIALS environment variable.")
+        
+    tasks_info = json.loads(tasks_creds_json)
+    
     creds = OAuthCredentials(
         token=None,
-        refresh_token=os.environ["GOOGLE_TASKS_REFRESH_TOKEN"],
-        client_id=os.environ["GOOGLE_CLIENT_ID"],
-        client_secret=os.environ["GOOGLE_CLIENT_SECRET"],
-        token_uri="https://oauth2.googleapis.com/token",
-        scopes=["https://www.googleapis.com/auth/tasks"],
+        refresh_token=tasks_info["refresh_token"],
+        client_id=tasks_info["client_id"],
+        client_secret=tasks_info["client_secret"],
+        token_uri=tasks_info.get("token_uri", "[https://oauth2.googleapis.com/token](https://oauth2.googleapis.com/token)"),
+        scopes=["[https://www.googleapis.com/auth/tasks](https://www.googleapis.com/auth/tasks)"],
     )
     creds.refresh(Request())
     logger.info("Google Tasks token refreshed OK")
