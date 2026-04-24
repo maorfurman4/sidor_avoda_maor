@@ -35,8 +35,8 @@ RUN_DURATION_SECONDS = 25 * 60  # 25 minutes
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "שלום! אני הבוט של מאור לסידור עבודה 💼\n\n"
-        "שלח לי תמונה של הסידור עבודה ואני אזהה את המשמרות שלך "
-        "ואוסיף אותן אוטומטית ל-Google Calendar."
+        "שלח לי את הסידור עבודה כ-📎 קובץ (לא תמונה!) לאיכות מיטבית.\n"
+        "לחץ על 📎 → קובץ → בחר את התמונה."
     )
 
 
@@ -45,8 +45,11 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("מעבד את הסידור... ⏳")
 
     try:
-        photo = update.message.photo[-1]
-        file = await context.bot.get_file(photo.file_id)
+        if update.message.document:
+            file = await context.bot.get_file(update.message.document.file_id)
+        else:
+            photo = update.message.photo[-1]
+            file = await context.bot.get_file(photo.file_id)
         image_bytes = await file.download_as_bytearray()
 
         shifts = parse_schedule_image(bytes(image_bytes))
@@ -88,7 +91,7 @@ async def shutdown_after(app: Application, seconds: int):
 def main():
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+    app.add_handler(MessageHandler(filters.PHOTO | filters.Document.IMAGE, handle_photo))
 
     async def post_init(application: Application):
         asyncio.create_task(shutdown_after(application, RUN_DURATION_SECONDS))
