@@ -60,13 +60,14 @@ async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         links = create_all_shifts(shifts)
 
-        lines = ["✅ המשמרות נוספו ל-Google Calendar:\n"]
+        lines = ["✅ עודכן ביומן!\n"]
         for shift in shifts:
             end_note = " (+1 יום)" if shift["shift_type"] in ("לילה", "כפולה לילה") else ""
             lines.append(
-                f"📅 {shift['date']} — {shift['location']}, "
-                f"{shift['role']}, {shift['shift_type']} "
-                f"({shift['start_time']}–{shift['end_time']}{end_note})"
+                f"📅 תאריך: {shift['date']}\n"
+                f"📍 מיקום: {shift['location']}\n"
+                f"🪖 עמדה: {shift['role']}\n"
+                f"⏰ משמרת: {shift['shift_type']} ({shift['start_time']}–{shift['end_time']}{end_note})\n"
             )
 
         await update.message.reply_text("\n".join(lines))
