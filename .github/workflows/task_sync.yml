@@ -29,4 +29,5 @@ jobs:
           CHAT_ID: ${{ secrets.CHAT_ID }}
           OPEN_API_KEY: ${{ secrets.OPEN_API_KEY }}
           GOOGLE_SERVICE_ACCOUNT_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_CALENDAR_ID: maorfurman123@gmail.com
         run: python task_sync.py

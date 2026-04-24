@@ -235,7 +235,7 @@ def main():
                     when = f"{parsed['date']} {parsed['start_time']}–{end_dt.strftime('%H:%M')}"
                     icon = "📅"
 
-                service.events().insert(calendarId="primary", body=event_body).execute()
+                service.events().insert(calendarId=os.environ.get("GOOGLE_CALENDAR_ID", "primary"), body=event_body).execute()
                 added.append(f'{icon} "{parsed["title"]}" — {when}')
                 logger.info(f"Added: {parsed['title']}")
 
